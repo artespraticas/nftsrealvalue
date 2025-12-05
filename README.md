@@ -1,5 +1,4 @@
-The app prioritizes actual transaction data over misleading floor prices, providing users with accurate NFT valuations based on real market activity. The service layer is structured to easily integrate with real NFT APIs when ready to connect live data sources.
-Core Functionality:
+The app prioritizes actual transaction data over misleading floor, listing or bid prices, providing users with accurate NFT valuations based on real market activity. Core Functionality:
 Real Price Analysis: Uses last sold prices and mint costs as primary valuation factors
 Multi-Chain Support: Ethereum, Base, Arbitrum, Optimism, and Solana integration
 Wallet Portfolio Analysis: Complete portfolio valuation with chain distribution
