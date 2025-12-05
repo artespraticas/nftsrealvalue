@@ -1,0 +1,120 @@
+✅ Minimal Serverless Function: last-sale-or-mint
+import axios from "axios";
+
+const OPENSEA_KEY = process.env.OPENSEA_KEY!;
+const ALCHEMY_KEY = process.env.ALCHEMY_KEY!;
+
+// --------------------------
+// HELPERS
+// --------------------------
+
+// 1) Try last sale from OpenSea
+async function fetchLastSaleOpenSea(collectionSlug: string, tokenId: string) {
+  try {
+    const url = `https://api.opensea.io/api/v2/events/collection/${collectionSlug}?event_type=successful&token_id=${tokenId}&limit=1`;
+
+    const res = await axios.get(url, {
+      headers: { "X-API-KEY": OPENSEA_KEY },
+    });
+
+    const ev = res.data?.events?.[0];
+    if (!ev) return null;
+
+    return {
+      method: "last_sale",
+      source: "OpenSea",
+      price: Number(ev.total_price) / 10 ** ev.payment_token.decimals,
+      currency: ev.payment_token.symbol,
+      txHash: ev.transaction?.transaction_hash,
+      timestamp: ev.created_date,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+// 2) Try last sale from Alchemy
+async function fetchLastSaleAlchemy(contractAddress: string, tokenId: string) {
+  try {
+    const url = `https://eth-mainnet.g.alchemy.com/nft/v2/${ALCHEMY_KEY}/getNFTSales?contractAddress=${contractAddress}&tokenId=${tokenId}&limit=1`;
+
+    const res = await axios.get(url);
+    const sale = res.data?.sales?.[0];
+    if (!sale) return null;
+
+    return {
+      method: "last_sale",
+      source: "Alchemy",
+      price: sale.price.amount,
+      currency: sale.price.currency,
+      txHash: sale.transactionHash,
+      timestamp: sale.timestamp,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+// 3) Fallback: Derive mint price from the first mint transaction
+async function fetchMintPriceAlchemy(contractAddress: string) {
+  try {
+    const url = `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`;
+    const body = {
+      id: 1,
+      jsonrpc: "2.0",
+      method: "alchemy_getAssetTransfers",
+      params: [
+        {
+          contractAddresses: [contractAddress],
+          category: ["erc721"],
+          fromAddress: "0x0000000000000000000000000000000000000001",
+          order: "asc",
+          maxCount: "1",
+        },
+      ],
+    };
+
+    const res = await axios.post(url, body);
+    const tx = res.data?.result?.transfers?.[0];
+    if (!tx) return null;
+
+    return {
+      method: "mint_price",
+      source: "OnChain",
+      price: tx.value ?? 0,
+      currency: "ETH",
+      txHash: tx.hash,
+      timestamp: tx.metadata?.blockTimestamp,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+// --------------------------
+// MAIN API HANDLER
+// --------------------------
+export default async function handler(req, res) {
+  try {
+    const { collectionSlug, contractAddress, tokenId } = req.query;
+
+    if (!collectionSlug || !contractAddress || !tokenId)
+      return res.status(400).json({ error: "Missing params" });
+
+    // 1) Try OpenSea
+    const os = await fetchLastSaleOpenSea(collectionSlug, tokenId);
+    if (os) return res.json(os);
+
+    // 2) Try Alchemy
+    const alch = await fetchLastSaleAlchemy(contractAddress, tokenId);
+    if (alch) return res.json(alch);
+
+    // 3) Fallback → Mint price
+    const mint = await fetchMintPriceAlchemy(contractAddress);
+    if (mint) return res.json(mint);
+
+    return res.json({ value: null, reason: "No sale/mint data found" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
